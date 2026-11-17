@@ -3,20 +3,68 @@ on:
   push:
     branches:
       - main
+    paths:
+      - .github/workflows/pet.yml
   schedule:
-    - cron: '23 */6 * * *'   
+    - cron: '23 */6 * * *'
   workflow_dispatch:
 
-permissions:
-  contents: write
+permissions: {}
+
+concurrency:
+  group: pet
 
 jobs:
-  pet:
+  generate:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: prsdx/YourTomo@v1
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          username: meltude        
-          timezone-offset-minutes: "120"
+          persist-credentials: false
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          repository: prsdx/YourTomo
+          ref: 988c75ee4f1ad5374d3ca692db4b307761776067
+          path: yourtomo
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: "1.4.4"
+      - run: bun yourtomo/generate.ts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PET_USER: meltude
+          PET_TZ_OFFSET_MINUTES: "120"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: pet-dist
+          path: dist
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: generate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          ref: main
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: pet-dist
+          path: pet-dist
+      - run: |
+          cp -- pet-dist/*.svg pet-dist/state.json dist/
+          git add -- dist
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Update pet state [skip ci]"
+          git push origin HEAD:main
